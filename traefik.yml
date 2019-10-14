@@ -1,0 +1,93 @@
+#!/bin/bash
+#
+# Title:      PSAutomate
+# Based On:   PGBlitz (Reference Title File)
+# Original Author(s):  Admin9705 - Deiteq
+# PSAutomate Auther: fattylewis
+# URL:        https://psautomate.io - http://github.psautomate.io
+# GNU:        General Public License v3.0
+################################################################################
+---
+- hosts: localhost
+  gather_facts: True
+  tasks:
+
+    # BASIC TASKS ######################################################
+    - name: 'Including cron job'
+      include_tasks: '/psa/traefik/provider.yml'
+
+    - name: Register E-Mail
+      shell: "cat /psa/var/server.email"
+      register: email
+
+    - name: Register Delay Check
+      shell: "cat /psa/var/server.delaycheck"
+      register: delaycheck
+
+    - name: Register Domain
+      shell: "cat /psa/var/server.domain"
+      register: domain
+
+    - name: Register Provider
+      shell: "cat /psa/var/traefik.provider"
+      register: provider
+
+    - name: Remove Traefik
+      docker_container:
+        name: traefik
+        state: absent
+
+    - name: Removing Prior Traefik.toml
+      file:
+        state: absent
+        path: /psa/data/traefik/traefik.toml
+
+    - name: Create Basic Directories
+      file: "path={{item}} state=directory mode=0775 owner=1000 group=1000"
+      with_items:
+        - /psa/data/traefik
+        - /psa/data/traefik/acme
+
+    - name: Installing Traefik.Toml
+      template:
+        src: traefik.toml
+        dest: /psa/data/traefik/traefik.toml
+        force: yes
+        owner: '1000'
+        group: '1000'
+
+    - name: Check acme.json exists
+      stat:
+        path: "/psa/data/traefik/acme/acme.json"
+      register: acme_json
+
+    - name: Installing ACME
+      template:
+        src: acme.json
+        dest: /psa/data/traefik/acme/acme.json
+        force: yes
+        mode: 0600
+        owner: '1000'
+        group: '1000'
+      when: acme_json.stat.exists == False
+    # MAIN #####################################################################
+    - name: Deploy Traefik
+      docker_container:
+        name: traefik
+        image: traefik:1.7
+        pull: yes
+        published_ports:
+          - "443:443"
+          - "80:80"
+        env: '{{psa_env}}'
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - /etc/localtime:/etc/localtime:ro
+          - /psa/data/traefik/traefik.toml:/etc/traefik/traefik.toml:ro
+          - /psa/data/traefik/acme:/etc/traefik/acme
+        restart_policy: unless-stopped
+        state: started
+        networks:
+          - name: psautomate
+            aliases:
+              - traefik
